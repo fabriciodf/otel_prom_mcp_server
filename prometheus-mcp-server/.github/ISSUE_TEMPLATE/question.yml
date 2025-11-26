@@ -1,0 +1,171 @@
+name: ❓ Question or Support
+description: Ask a question or get help with configuration/usage
+title: "[Question]: "
+labels: ["type: question", "status: needs-triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for your question! Please provide as much detail as possible so we can help you effectively.
+        
+        **Note**: For general discussions, feature brainstorming, or community chat, consider using [Discussions](https://github.com/pab1it0/prometheus-mcp-server/discussions) instead.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please complete the following before asking your question
+      options:
+        - label: I have searched existing issues and discussions for similar questions
+          required: true
+        - label: I have checked the documentation and README
+          required: true
+        - label: I have tried basic troubleshooting steps
+          required: false
+
+  - type: dropdown
+    id: question-type
+    attributes:
+      label: Question Type
+      description: What type of help do you need?
+      options:
+        - Configuration Help (setup, environment variables, MCP client config)
+        - Usage Help (how to use tools, execute queries)
+        - Troubleshooting (something not working as expected)
+        - Integration Help (connecting to Prometheus, MCP clients)
+        - Authentication Help (setting up auth, credentials)
+        - Performance Question (optimization, best practices)
+        - Deployment Help (Docker, production setup)
+        - General Question (understanding concepts, how things work)
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What would you like to know or what help do you need?
+      placeholder: Please describe your question or the help you need in detail
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and Background
+      description: Provide context about what you're trying to accomplish
+      placeholder: |
+        - What are you trying to achieve?
+        - What is your use case?
+        - What have you tried so far?
+        - Where are you getting stuck?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: experience-level
+    attributes:
+      label: Experience Level
+      description: How familiar are you with the relevant technologies?
+      options:
+        - Beginner (new to Prometheus, MCP, or similar tools)
+        - Intermediate (some experience with related technologies)
+        - Advanced (experienced user looking for specific guidance)
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-setup
+    attributes:
+      label: Current Setup
+      description: Describe your current setup and configuration
+      placeholder: |
+        - Operating System: 
+        - Python Version: 
+        - Prometheus MCP Server Version: 
+        - Prometheus Version: 
+        - MCP Client (Claude Desktop, etc.): 
+        - Transport Mode (stdio/HTTP/SSE): 
+      render: markdown
+    validations:
+      required: false
+
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Configuration
+      description: Share your current configuration (remove sensitive information)
+      placeholder: |
+        Environment variables:
+        PROMETHEUS_URL=...
+        
+        MCP Client configuration:
+        {
+          "mcpServers": {
+            ...
+          }
+        }
+      render: bash
+    validations:
+      required: false
+
+  - type: textarea
+    id: attempted-solutions
+    attributes:
+      label: What Have You Tried?
+      description: What troubleshooting steps or solutions have you already attempted?
+      placeholder: |
+        - Checked documentation sections: ...
+        - Tried different configurations: ...
+        - Searched for similar issues: ...
+        - Tested with different versions: ...
+    validations:
+      required: false
+
+  - type: textarea
+    id: error-messages
+    attributes:
+      label: Error Messages or Logs
+      description: Include any error messages, logs, or unexpected behavior
+      placeholder: Paste any relevant error messages or log output here
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected-outcome
+    attributes:
+      label: Expected Outcome
+      description: What result or behavior are you hoping to achieve?
+      placeholder: Describe what you expect to happen or what success looks like
+    validations:
+      required: false
+
+  - type: dropdown
+    id: urgency
+    attributes:
+      label: Urgency
+      description: How urgent is this question for you?
+      options:
+        - Low - General curiosity or learning
+        - Medium - Helpful for current project
+        - High - Blocking current work
+        - Critical - Production issue or deadline-critical
+      default: 1
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-info
+    attributes:
+      label: Additional Information
+      description: Any other details that might be helpful
+      placeholder: |
+        - Screenshots or diagrams
+        - Links to relevant documentation you've already read
+        - Specific Prometheus metrics or queries you're working with
+        - Network or infrastructure details
+        - Timeline or constraints
+    validations:
+      required: false

@@ -1,0 +1,264 @@
+name: Label Management
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'sync'
+        type: choice
+        options:
+        - sync
+        - create-missing
+        - audit
+  schedule:
+    # Sync labels weekly
+    - cron: '0 2 * * 0'
+
+jobs:
+  label-sync:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create/Update Labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Define the complete label schema for bug triage
+            const labels = [
+              // Priority Labels
+              { name: 'priority: critical', color: 'B60205', description: 'Critical priority - immediate attention required' },
+              { name: 'priority: high', color: 'D93F0B', description: 'High priority - should be addressed soon' },
+              { name: 'priority: medium', color: 'FBCA04', description: 'Medium priority - normal timeline' },
+              { name: 'priority: low', color: '0E8A16', description: 'Low priority - can be addressed when convenient' },
+              
+              // Status Labels
+              { name: 'status: needs-triage', color: 'E99695', description: 'Issue needs initial triage and labeling' },
+              { name: 'status: in-progress', color: '0052CC', description: 'Issue is actively being worked on' },
+              { name: 'status: waiting-for-response', color: 'F9D0C4', description: 'Waiting for response from issue author' },
+              { name: 'status: stale', color: '795548', description: 'Issue marked as stale due to inactivity' },
+              { name: 'status: in-review', color: '6F42C1', description: 'Issue has an associated PR under review' },
+              { name: 'status: blocked', color: 'D73A4A', description: 'Issue is blocked by external dependencies' },
+              
+              // Component Labels
+              { name: 'component: prometheus', color: 'E6522C', description: 'Issues related to Prometheus integration' },
+              { name: 'component: mcp-server', color: '1F77B4', description: 'Issues related to MCP server functionality' },
+              { name: 'component: deployment', color: '2CA02C', description: 'Issues related to deployment and containerization' },
+              { name: 'component: authentication', color: 'FF7F0E', description: 'Issues related to authentication mechanisms' },
+              { name: 'component: configuration', color: '9467BD', description: 'Issues related to configuration and setup' },
+              { name: 'component: logging', color: '8C564B', description: 'Issues related to logging and monitoring' },
+              
+              // Type Labels
+              { name: 'type: bug', color: 'D73A4A', description: 'Something isn\'t working as expected' },
+              { name: 'type: feature', color: 'A2EEEF', description: 'New feature or enhancement request' },
+              { name: 'type: documentation', color: '0075CA', description: 'Documentation improvements or additions' },
+              { name: 'type: performance', color: 'FF6B6B', description: 'Performance related issues or optimizations' },
+              { name: 'type: testing', color: 'BFD4F2', description: 'Issues related to testing and QA' },
+              { name: 'type: maintenance', color: 'CFCFCF', description: 'Maintenance and technical debt issues' },
+              
+              // Environment Labels
+              { name: 'env: windows', color: '0078D4', description: 'Issues specific to Windows environment' },
+              { name: 'env: macos', color: '000000', description: 'Issues specific to macOS environment' },
+              { name: 'env: linux', color: 'FCC624', description: 'Issues specific to Linux environment' },
+              { name: 'env: docker', color: '2496ED', description: 'Issues related to Docker deployment' },
+              
+              // Difficulty Labels
+              { name: 'difficulty: beginner', color: '7057FF', description: 'Good for newcomers to the project' },
+              { name: 'difficulty: intermediate', color: 'F39C12', description: 'Requires moderate experience with the codebase' },
+              { name: 'difficulty: advanced', color: 'E67E22', description: 'Requires deep understanding of the codebase' },
+              
+              // Special Labels
+              { name: 'help wanted', color: '008672', description: 'Community help is welcome on this issue' },
+              { name: 'security', color: 'B60205', description: 'Security related issues - handle with priority' },
+              { name: 'breaking-change', color: 'B60205', description: 'Changes that would break existing functionality' },
+              { name: 'needs-investigation', color: '795548', description: 'Issue requires investigation to understand root cause' },
+              { name: 'wontfix', color: 'FFFFFF', description: 'This will not be worked on' },
+              { name: 'duplicate', color: 'CFD3D7', description: 'This issue or PR already exists' }
+            ];
+
+            // Get existing labels
+            const existingLabels = await github.rest.issues.listLabelsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+
+            const existingLabelMap = new Map(
+              existingLabels.data.map(label => [label.name, label])
+            );
+
+            const action = '${{ github.event.inputs.action }}' || 'sync';
+            console.log(`Performing action: ${action}`);
+
+            for (const label of labels) {
+              const existing = existingLabelMap.get(label.name);
+              
+              if (existing) {
+                // Update existing label if color or description changed
+                if (existing.color !== label.color || existing.description !== label.description) {
+                  console.log(`Updating label: ${label.name}`);
+                  if (action === 'sync' || action === 'create-missing') {
+                    try {
+                      await github.rest.issues.updateLabel({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        name: label.name,
+                        color: label.color,
+                        description: label.description
+                      });
+                    } catch (error) {
+                      console.log(`Failed to update label ${label.name}: ${error.message}`);
+                    }
+                  }
+                } else {
+                  console.log(`Label ${label.name} is up to date`);
+                }
+              } else {
+                // Create new label
+                console.log(`Creating label: ${label.name}`);
+                if (action === 'sync' || action === 'create-missing') {
+                  try {
+                    await github.rest.issues.createLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      name: label.name,
+                      color: label.color,
+                      description: label.description
+                    });
+                  } catch (error) {
+                    console.log(`Failed to create label ${label.name}: ${error.message}`);
+                  }
+                }
+              }
+            }
+
+            // Audit mode: report on unused or outdated labels
+            if (action === 'audit') {
+              const definedLabelNames = new Set(labels.map(l => l.name));
+              const unusedLabels = existingLabels.data.filter(
+                label => !definedLabelNames.has(label.name) && !label.default
+              );
+
+              if (unusedLabels.length > 0) {
+                console.log('\n=== AUDIT: Unused Labels ===');
+                unusedLabels.forEach(label => {
+                  console.log(`- ${label.name} (${label.color}): ${label.description || 'No description'}`);
+                });
+              }
+
+              // Check for issues with deprecated labels
+              const { data: issues } = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                per_page: 100
+              });
+
+              const deprecatedLabelUsage = new Map();
+              for (const issue of issues) {
+                if (issue.pull_request) continue;
+                
+                for (const label of issue.labels) {
+                  if (!definedLabelNames.has(label.name) && !label.default) {
+                    if (!deprecatedLabelUsage.has(label.name)) {
+                      deprecatedLabelUsage.set(label.name, []);
+                    }
+                    deprecatedLabelUsage.get(label.name).push(issue.number);
+                  }
+                }
+              }
+
+              if (deprecatedLabelUsage.size > 0) {
+                console.log('\n=== AUDIT: Issues with Deprecated Labels ===');
+                for (const [labelName, issueNumbers] of deprecatedLabelUsage) {
+                  console.log(`${labelName}: Issues ${issueNumbers.join(', ')}`);
+                }
+              }
+            }
+
+            console.log('\nLabel management completed successfully!');
+
+  label-cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'cleanup'
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - name: Cleanup deprecated labels from issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Define mappings for deprecated labels to new ones
+            const labelMigrations = {
+              'bug': 'type: bug',
+              'enhancement': 'type: feature',
+              'documentation': 'type: documentation',
+              'good first issue': 'difficulty: beginner',
+              'question': 'status: needs-triage'
+            };
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              per_page: 100
+            });
+
+            for (const issue of issues) {
+              if (issue.pull_request) continue;
+              
+              let needsUpdate = false;
+              const labelsToRemove = [];
+              const labelsToAdd = [];
+              
+              for (const label of issue.labels) {
+                if (labelMigrations[label.name]) {
+                  labelsToRemove.push(label.name);
+                  labelsToAdd.push(labelMigrations[label.name]);
+                  needsUpdate = true;
+                }
+              }
+              
+              if (needsUpdate) {
+                console.log(`Updating labels for issue #${issue.number}`);
+                
+                // Remove old labels
+                for (const labelToRemove of labelsToRemove) {
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      name: labelToRemove
+                    });
+                  } catch (error) {
+                    console.log(`Could not remove label ${labelToRemove}: ${error.message}`);
+                  }
+                }
+                
+                // Add new labels
+                if (labelsToAdd.length > 0) {
+                  try {
+                    await github.rest.issues.addLabels({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      labels: labelsToAdd
+                    });
+                  } catch (error) {
+                    console.log(`Could not add labels to #${issue.number}: ${error.message}`);
+                  }
+                }
+              }
+            }
+
+            console.log('Label cleanup completed!');

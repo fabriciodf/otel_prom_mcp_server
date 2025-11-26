@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📚 Documentation
+    url: https://github.com/pab1it0/prometheus-mcp-server/blob/main/README.md
+    about: Read the project documentation and setup guides
+  - name: 💬 Discussions
+    url: https://github.com/pab1it0/prometheus-mcp-server/discussions
+    about: Ask questions, share ideas, and discuss with the community
+  - name: 🔒 Security Issues
+    url: mailto:security@cloudefined.com
+    about: Report security vulnerabilities privately via email

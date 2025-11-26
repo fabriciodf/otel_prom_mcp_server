@@ -1,0 +1,505 @@
+name: Bug Triage Automation
+
+on:
+  issues:
+    types: [opened, edited, labeled, unlabeled, assigned, unassigned]
+  issue_comment:
+    types: [created, edited]
+  pull_request:
+    types: [opened, closed, merged]
+  schedule:
+    # Run triage check every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      triage_all:
+        description: 'Re-triage all open issues'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  auto-triage:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' || github.event_name == 'issue_comment'
+    permissions:
+      issues: write
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Auto-label new issues
+        if: github.event.action == 'opened' && github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const title = issue.title.toLowerCase();
+            const body = issue.body ? issue.body.toLowerCase() : '';
+            const labels = [];
+
+            // Severity-based labeling
+            if (title.includes('critical') || title.includes('crash') || title.includes('data loss') || 
+                body.includes('critical') || body.includes('crash') || body.includes('data loss')) {
+              labels.push('priority: critical');
+            } else if (title.includes('urgent') || title.includes('blocking') || 
+                      body.includes('urgent') || body.includes('blocking')) {
+              labels.push('priority: high');
+            } else if (title.includes('minor') || title.includes('cosmetic') ||
+                      body.includes('minor') || body.includes('cosmetic')) {
+              labels.push('priority: low');
+            } else {
+              labels.push('priority: medium');
+            }
+
+            // Component-based labeling
+            if (title.includes('prometheus') || title.includes('metrics') || title.includes('query') ||
+                body.includes('prometheus') || body.includes('metrics') || body.includes('promql')) {
+              labels.push('component: prometheus');
+            }
+            if (title.includes('mcp') || title.includes('server') || title.includes('transport') ||
+                body.includes('mcp') || body.includes('server') || body.includes('transport')) {
+              labels.push('component: mcp-server');
+            }
+            if (title.includes('docker') || title.includes('container') || title.includes('deployment') ||
+                body.includes('docker') || body.includes('container') || body.includes('deployment')) {
+              labels.push('component: deployment');
+            }
+            if (title.includes('auth') || title.includes('authentication') || title.includes('token') ||
+                body.includes('auth') || body.includes('authentication') || body.includes('token')) {
+              labels.push('component: authentication');
+            }
+
+            // Type-based labeling
+            if (title.includes('feature') || title.includes('enhancement') || title.includes('improvement') ||
+                body.includes('feature request') || body.includes('enhancement')) {
+              labels.push('type: feature');
+            } else if (title.includes('doc') || title.includes('documentation') ||
+                      body.includes('documentation')) {
+              labels.push('type: documentation');
+            } else if (title.includes('test') || body.includes('test')) {
+              labels.push('type: testing');
+            } else if (title.includes('performance') || body.includes('performance') || 
+                      title.includes('slow') || body.includes('slow')) {
+              labels.push('type: performance');
+            } else {
+              labels.push('type: bug');
+            }
+
+            // Environment-based labeling
+            if (body.includes('windows') || title.includes('windows')) {
+              labels.push('env: windows');
+            } else if (body.includes('macos') || body.includes('mac') || title.includes('macos')) {
+              labels.push('env: macos');
+            } else if (body.includes('linux') || title.includes('linux')) {
+              labels.push('env: linux');
+            }
+
+            // Add status label
+            labels.push('status: needs-triage');
+
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels: labels
+              });
+            }
+
+      - name: Auto-assign based on component
+        if: github.event.action == 'labeled' && github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const labelName = context.payload.label.name;
+            
+            // Define component maintainers
+            const componentAssignees = {
+              'component: prometheus': ['pab1it0'],
+              'component: mcp-server': ['pab1it0'],
+              'component: deployment': ['pab1it0'],
+              'component: authentication': ['pab1it0']
+            };
+            
+            if (componentAssignees[labelName] && issue.assignees.length === 0) {
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                assignees: componentAssignees[labelName]
+              });
+            }
+
+      - name: Update triage status
+        if: github.event.action == 'assigned' && github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const hasTriageLabel = issue.labels.some(label => label.name === 'status: needs-triage');
+            
+            if (hasTriageLabel) {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                name: 'status: needs-triage'
+              });
+              
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels: ['status: in-progress']
+              });
+            }
+
+      - name: Welcome new contributors
+        if: github.event.action == 'opened' && github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const author = issue.user.login;
+            
+            // Check if this is the user's first issue
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              creator: author,
+              state: 'all'
+            });
+            
+            if (issues.data.length === 1) {
+              const welcomeMessage = `
+            👋 Welcome to the Prometheus MCP Server project, @${author}!
+
+            Thank you for taking the time to report this issue. This project provides AI assistants with access to Prometheus metrics through the Model Context Protocol (MCP).
+
+            To help us resolve your issue quickly:
+            - Please ensure you've filled out all relevant sections of the issue template
+            - Include your environment details (OS, Python version, Prometheus version)
+            - Provide steps to reproduce if applicable
+            - Check if this might be related to Prometheus configuration rather than the MCP server
+
+            A maintainer will review and triage your issue soon. If you're interested in contributing a fix, please feel free to submit a pull request!
+
+            **Useful resources:**
+            - [Configuration Guide](https://github.com/pab1it0/prometheus-mcp-server/blob/main/docs/configuration.md)
+            - [Installation Guide](https://github.com/pab1it0/prometheus-mcp-server/blob/main/docs/installation.md)
+            - [Contributing Guidelines](https://github.com/pab1it0/prometheus-mcp-server/blob/main/docs/contributing.md)
+            `;
+              
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: welcomeMessage
+              });
+            }
+
+  scheduled-triage:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event.inputs.triage_all == 'true'
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Triage stale issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              sort: 'updated',
+              direction: 'asc',
+              per_page: 100
+            });
+
+            const now = new Date();
+            const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+            const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+
+            for (const issue of issues) {
+              if (issue.pull_request) continue; // Skip PRs
+              
+              const updatedAt = new Date(issue.updated_at);
+              const hasNeedsTriageLabel = issue.labels.some(label => label.name === 'status: needs-triage');
+              const hasStaleLabel = issue.labels.some(label => label.name === 'status: stale');
+              const hasWaitingLabel = issue.labels.some(label => label.name === 'status: waiting-for-response');
+
+              // Mark issues as stale if no activity for 30 days
+              if (updatedAt < thirtyDaysAgo && !hasStaleLabel && !hasWaitingLabel) {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  labels: ['status: stale']
+                });
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `This issue has been automatically marked as stale because it has not had recent activity. It will be closed in 7 days if no further activity occurs. Thank you for your contributions.`
+                });
+              }
+
+              // Auto-close issues that have been stale for 7 days
+              else if (updatedAt < thirtyDaysAgo && hasStaleLabel) {
+                const comments = await github.rest.issues.listComments({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number
+                });
+
+                const staleComment = comments.data.find(comment => 
+                  comment.body.includes('automatically marked as stale')
+                );
+
+                if (staleComment) {
+                  const staleCommentDate = new Date(staleComment.created_at);
+                  const sevenDaysAfterStale = new Date(staleCommentDate.getTime() + (7 * 24 * 60 * 60 * 1000));
+
+                  if (now > sevenDaysAfterStale) {
+                    await github.rest.issues.update({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      state: 'closed'
+                    });
+
+                    await github.rest.issues.createComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      body: `This issue has been automatically closed due to inactivity. If you believe this issue is still relevant, please reopen it with updated information.`
+                    });
+                  }
+                }
+              }
+
+              // Remove needs-triage if issue has been responded to by maintainer
+              else if (hasNeedsTriageLabel && updatedAt > sevenDaysAgo) {
+                const comments = await github.rest.issues.listComments({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number
+                });
+
+                const maintainerResponse = comments.data.some(comment => 
+                  comment.user.login === 'pab1it0' && 
+                  new Date(comment.created_at) > sevenDaysAgo
+                );
+
+                if (maintainerResponse) {
+                  await github.rest.issues.removeLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number,
+                    name: 'status: needs-triage'
+                  });
+                }
+              }
+            }
+
+  metrics-report:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    permissions:
+      issues: read
+      contents: read
+
+    steps:
+      - name: Generate triage metrics
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              per_page: 100
+            });
+
+            const now = new Date();
+            const oneWeekAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+            const oneMonthAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+
+            let metrics = {
+              total_open: 0,
+              needs_triage: 0,
+              in_progress: 0,
+              waiting_response: 0,
+              stale: 0,
+              new_this_week: 0,
+              closed_this_week: 0,
+              by_priority: { critical: 0, high: 0, medium: 0, low: 0 },
+              by_component: { prometheus: 0, 'mcp-server': 0, deployment: 0, authentication: 0 },
+              by_type: { bug: 0, feature: 0, documentation: 0, performance: 0 }
+            };
+
+            for (const issue of issues) {
+              if (issue.pull_request) continue;
+
+              const createdAt = new Date(issue.created_at);
+              const closedAt = issue.closed_at ? new Date(issue.closed_at) : null;
+
+              if (issue.state === 'open') {
+                metrics.total_open++;
+
+                // Count by status
+                issue.labels.forEach(label => {
+                  if (label.name === 'status: needs-triage') metrics.needs_triage++;
+                  if (label.name === 'status: in-progress') metrics.in_progress++;
+                  if (label.name === 'status: waiting-for-response') metrics.waiting_response++;
+                  if (label.name === 'status: stale') metrics.stale++;
+
+                  // Count by priority
+                  if (label.name.startsWith('priority: ')) {
+                    const priority = label.name.replace('priority: ', '');
+                    if (metrics.by_priority[priority] !== undefined) {
+                      metrics.by_priority[priority]++;
+                    }
+                  }
+
+                  // Count by component
+                  if (label.name.startsWith('component: ')) {
+                    const component = label.name.replace('component: ', '');
+                    if (metrics.by_component[component] !== undefined) {
+                      metrics.by_component[component]++;
+                    }
+                  }
+
+                  // Count by type
+                  if (label.name.startsWith('type: ')) {
+                    const type = label.name.replace('type: ', '');
+                    if (metrics.by_type[type] !== undefined) {
+                      metrics.by_type[type]++;
+                    }
+                  }
+                });
+              }
+
+              // Count new issues this week
+              if (createdAt > oneWeekAgo) {
+                metrics.new_this_week++;
+              }
+
+              // Count closed issues this week
+              if (closedAt && closedAt > oneWeekAgo) {
+                metrics.closed_this_week++;
+              }
+            }
+
+            // Log metrics (can be extended to send to external systems)
+            console.log('=== ISSUE TRIAGE METRICS ===');
+            console.log(`Total Open Issues: ${metrics.total_open}`);
+            console.log(`Needs Triage: ${metrics.needs_triage}`);
+            console.log(`In Progress: ${metrics.in_progress}`);
+            console.log(`Waiting for Response: ${metrics.waiting_response}`);
+            console.log(`Stale Issues: ${metrics.stale}`);
+            console.log(`New This Week: ${metrics.new_this_week}`);
+            console.log(`Closed This Week: ${metrics.closed_this_week}`);
+            console.log('Priority Distribution:', JSON.stringify(metrics.by_priority));
+            console.log('Component Distribution:', JSON.stringify(metrics.by_component));
+            console.log('Type Distribution:', JSON.stringify(metrics.by_type));
+
+  pr-integration:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Link PR to issues
+        if: github.event.action == 'opened'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || '';
+            
+            // Extract issue numbers from PR body
+            const issueMatches = body.match(/(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#(\d+)/gi);
+            
+            if (issueMatches) {
+              for (const match of issueMatches) {
+                const issueNumber = match.match(/#(\d+)/)[1];
+                
+                try {
+                  // Add a comment to the issue
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: parseInt(issueNumber),
+                    body: `🔗 This issue is being addressed by PR #${pr.number}`
+                  });
+                  
+                  // Add in-review label to the issue
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: parseInt(issueNumber),
+                    labels: ['status: in-review']
+                  });
+                } catch (error) {
+                  console.log(`Could not update issue #${issueNumber}: ${error.message}`);
+                }
+              }
+            }
+
+      - name: Update issue status on PR merge
+        if: github.event.action == 'closed' && github.event.pull_request.merged
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || '';
+            
+            // Extract issue numbers from PR body
+            const issueMatches = body.match(/(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#(\d+)/gi);
+            
+            if (issueMatches) {
+              for (const match of issueMatches) {
+                const issueNumber = match.match(/#(\d+)/)[1];
+                
+                try {
+                  // Add a comment to the issue
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: parseInt(issueNumber),
+                    body: `✅ This issue has been resolved by PR #${pr.number} which was merged in commit ${pr.merge_commit_sha}`
+                  });
+                  
+                  // Remove in-review label
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: parseInt(issueNumber),
+                      name: 'status: in-review'
+                    });
+                  } catch (error) {
+                    // Label might not exist, ignore
+                  }
+                  
+                } catch (error) {
+                  console.log(`Could not update issue #${issueNumber}: ${error.message}`);
+                }
+              }
+            }

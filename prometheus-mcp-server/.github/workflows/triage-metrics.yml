@@ -1,0 +1,456 @@
+name: Triage Metrics & Reporting
+
+on:
+  schedule:
+    # Daily metrics at 8 AM UTC
+    - cron: '0 8 * * *'
+    # Weekly detailed report on Mondays at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      report_type:
+        description: 'Type of report to generate'
+        required: true
+        default: 'daily'
+        type: choice
+        options:
+        - daily
+        - weekly
+        - monthly
+        - custom
+      days_back:
+        description: 'Days back to analyze (for custom reports)'
+        required: false
+        default: '7'
+        type: string
+
+permissions:
+  issues: read
+  contents: write
+  pull-requests: read
+
+jobs:
+  collect-metrics:
+    runs-on: ubuntu-latest
+    outputs:
+      metrics_json: ${{ steps.calculate.outputs.metrics }}
+    
+    steps:
+      - name: Calculate Triage Metrics
+        id: calculate
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const reportType = '${{ github.event.inputs.report_type }}' || 'daily';
+            const daysBack = parseInt('${{ github.event.inputs.days_back }}' || '7');
+            
+            // Determine date range based on report type
+            const now = new Date();
+            let startDate;
+            
+            switch (reportType) {
+              case 'daily':
+                startDate = new Date(now.getTime() - (1 * 24 * 60 * 60 * 1000));
+                break;
+              case 'weekly':
+                startDate = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+                break;
+              case 'monthly':
+                startDate = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+                break;
+              case 'custom':
+                startDate = new Date(now.getTime() - (daysBack * 24 * 60 * 60 * 1000));
+                break;
+              default:
+                startDate = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+            }
+
+            console.log(`Analyzing ${reportType} metrics from ${startDate.toISOString()} to ${now.toISOString()}`);
+
+            // Fetch all issues and PRs
+            const allIssues = [];
+            let page = 1;
+            let hasMore = true;
+
+            while (hasMore && page <= 10) { // Limit to prevent excessive API calls
+              const { data: pageIssues } = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'all',
+                sort: 'updated',
+                direction: 'desc',
+                per_page: 100,
+                page: page
+              });
+
+              allIssues.push(...pageIssues);
+              
+              // Check if we've gone back far enough
+              const oldestInPage = new Date(Math.min(...pageIssues.map(i => new Date(i.updated_at))));
+              hasMore = pageIssues.length === 100 && oldestInPage > startDate;
+              page++;
+            }
+
+            // Initialize metrics
+            const metrics = {
+              period: {
+                type: reportType,
+                start: startDate.toISOString(),
+                end: now.toISOString(),
+                days: Math.ceil((now - startDate) / (1000 * 60 * 60 * 24))
+              },
+              overview: {
+                total_issues: 0,
+                total_prs: 0,
+                open_issues: 0,
+                closed_issues: 0,
+                new_issues: 0,
+                resolved_issues: 0
+              },
+              triage: {
+                needs_triage: 0,
+                triaged_this_period: 0,
+                avg_triage_time_hours: 0,
+                overdue_triage: 0
+              },
+              labels: {
+                by_priority: {},
+                by_component: {},
+                by_type: {},
+                by_status: {}
+              },
+              response_times: {
+                avg_first_response_hours: 0,
+                avg_resolution_time_hours: 0,
+                issues_without_response: 0
+              },
+              contributors: {
+                issue_creators: new Set(),
+                comment_authors: new Set(),
+                assignees: new Set()
+              },
+              quality: {
+                issues_with_templates: 0,
+                issues_missing_info: 0,
+                duplicate_issues: 0,
+                stale_issues: 0
+              }
+            };
+
+            const triageEvents = [];
+            const responseTimeData = [];
+
+            // Analyze each issue
+            for (const issue of allIssues) {
+              const createdAt = new Date(issue.created_at);
+              const updatedAt = new Date(issue.updated_at);
+              const closedAt = issue.closed_at ? new Date(issue.closed_at) : null;
+              const isPR = !!issue.pull_request;
+              const isInPeriod = updatedAt >= startDate;
+              
+              if (!isInPeriod && createdAt < startDate) continue;
+
+              // Basic counts
+              if (isPR) {
+                metrics.overview.total_prs++;
+              } else {
+                metrics.overview.total_issues++;
+                
+                if (issue.state === 'open') {
+                  metrics.overview.open_issues++;
+                } else {
+                  metrics.overview.closed_issues++;
+                }
+                
+                // New issues in period
+                if (createdAt >= startDate) {
+                  metrics.overview.new_issues++;
+                  metrics.contributors.issue_creators.add(issue.user.login);
+                }
+                
+                // Resolved issues in period
+                if (closedAt && closedAt >= startDate) {
+                  metrics.overview.resolved_issues++;
+                }
+              }
+
+              if (isPR) continue; // Skip PRs for issue-specific analysis
+
+              // Triage analysis
+              const hasNeedsTriageLabel = issue.labels.some(l => l.name === 'status: needs-triage');
+              if (hasNeedsTriageLabel) {
+                metrics.triage.needs_triage++;
+                const daysSinceCreated = (now - createdAt) / (1000 * 60 * 60 * 24);
+                if (daysSinceCreated > 3) {
+                  metrics.triage.overdue_triage++;
+                }
+              }
+
+              // Label analysis
+              for (const label of issue.labels) {
+                const labelName = label.name;
+                
+                if (labelName.startsWith('priority: ')) {
+                  const priority = labelName.replace('priority: ', '');
+                  metrics.labels.by_priority[priority] = (metrics.labels.by_priority[priority] || 0) + 1;
+                }
+                
+                if (labelName.startsWith('component: ')) {
+                  const component = labelName.replace('component: ', '');
+                  metrics.labels.by_component[component] = (metrics.labels.by_component[component] || 0) + 1;
+                }
+                
+                if (labelName.startsWith('type: ')) {
+                  const type = labelName.replace('type: ', '');
+                  metrics.labels.by_type[type] = (metrics.labels.by_type[type] || 0) + 1;
+                }
+                
+                if (labelName.startsWith('status: ')) {
+                  const status = labelName.replace('status: ', '');
+                  metrics.labels.by_status[status] = (metrics.labels.by_status[status] || 0) + 1;
+                }
+              }
+
+              // Assignment analysis
+              if (issue.assignees.length > 0) {
+                issue.assignees.forEach(assignee => {
+                  metrics.contributors.assignees.add(assignee.login);
+                });
+              }
+
+              // Quality analysis
+              const bodyLength = issue.body ? issue.body.length : 0;
+              if (bodyLength > 100 && issue.body.includes('###')) {
+                metrics.quality.issues_with_templates++;
+              } else if (bodyLength < 50) {
+                metrics.quality.issues_missing_info++;
+              }
+
+              // Check for stale issues
+              const daysSinceUpdate = (now - updatedAt) / (1000 * 60 * 60 * 24);
+              if (issue.state === 'open' && daysSinceUpdate > 30) {
+                metrics.quality.stale_issues++;
+              }
+
+              // Get comments for response time analysis
+              if (createdAt >= startDate) {
+                try {
+                  const { data: comments } = await github.rest.issues.listComments({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number
+                  });
+
+                  comments.forEach(comment => {
+                    metrics.contributors.comment_authors.add(comment.user.login);
+                  });
+
+                  // Find first maintainer response
+                  const maintainerResponse = comments.find(comment => 
+                    comment.user.login === 'pab1it0' ||
+                    comment.author_association === 'OWNER' ||
+                    comment.author_association === 'MEMBER'
+                  );
+
+                  if (maintainerResponse) {
+                    const responseTime = (new Date(maintainerResponse.created_at) - createdAt) / (1000 * 60 * 60);
+                    responseTimeData.push(responseTime);
+                  } else {
+                    metrics.response_times.issues_without_response++;
+                  }
+
+                  // Check for triage events
+                  const events = await github.rest.issues.listEvents({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number
+                  });
+
+                  for (const event of events.data) {
+                    if (event.event === 'labeled' && event.created_at >= startDate.toISOString()) {
+                      const labelName = event.label?.name;
+                      if (labelName && !labelName.startsWith('status: needs-triage')) {
+                        const triageTime = (new Date(event.created_at) - createdAt) / (1000 * 60 * 60);
+                        triageEvents.push(triageTime);
+                        metrics.triage.triaged_this_period++;
+                        break;
+                      }
+                    }
+                  }
+                } catch (error) {
+                  console.log(`Error fetching comments/events for issue #${issue.number}: ${error.message}`);
+                }
+              }
+            }
+
+            // Calculate averages
+            if (responseTimeData.length > 0) {
+              metrics.response_times.avg_first_response_hours = 
+                Math.round(responseTimeData.reduce((a, b) => a + b, 0) / responseTimeData.length * 100) / 100;
+            }
+
+            if (triageEvents.length > 0) {
+              metrics.triage.avg_triage_time_hours = 
+                Math.round(triageEvents.reduce((a, b) => a + b, 0) / triageEvents.length * 100) / 100;
+            }
+
+            // Convert sets to counts
+            metrics.contributors.unique_issue_creators = metrics.contributors.issue_creators.size;
+            metrics.contributors.unique_commenters = metrics.contributors.comment_authors.size;
+            metrics.contributors.unique_assignees = metrics.contributors.assignees.size;
+
+            // Clean up for JSON serialization
+            delete metrics.contributors.issue_creators;
+            delete metrics.contributors.comment_authors;
+            delete metrics.contributors.assignees;
+
+            console.log('Metrics calculation completed');
+            core.setOutput('metrics', JSON.stringify(metrics, null, 2));
+            
+            return metrics;
+
+  generate-report:
+    runs-on: ubuntu-latest
+    needs: collect-metrics
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate Markdown Report
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const metrics = JSON.parse('${{ needs.collect-metrics.outputs.metrics_json }}');
+            
+            // Generate markdown report
+            let report = `# 📊 Issue Triage Report\n\n`;
+            report += `**Period**: ${metrics.period.type} (${metrics.period.days} days)\n`;
+            report += `**Generated**: ${new Date().toISOString()}\n\n`;
+
+            // Overview Section
+            report += `## 📈 Overview\n\n`;
+            report += `| Metric | Count |\n`;
+            report += `|--------|-------|\n`;
+            report += `| Total Issues | ${metrics.overview.total_issues} |\n`;
+            report += `| Open Issues | ${metrics.overview.open_issues} |\n`;
+            report += `| Closed Issues | ${metrics.overview.closed_issues} |\n`;
+            report += `| New Issues | ${metrics.overview.new_issues} |\n`;
+            report += `| Resolved Issues | ${metrics.overview.resolved_issues} |\n`;
+            report += `| Total PRs | ${metrics.overview.total_prs} |\n\n`;
+
+            // Triage Section
+            report += `## 🏷️ Triage Status\n\n`;
+            report += `| Metric | Value |\n`;
+            report += `|--------|-------|\n`;
+            report += `| Issues Needing Triage | ${metrics.triage.needs_triage} |\n`;
+            report += `| Issues Triaged This Period | ${metrics.triage.triaged_this_period} |\n`;
+            report += `| Average Triage Time | ${metrics.triage.avg_triage_time_hours}h |\n`;
+            report += `| Overdue Triage (>3 days) | ${metrics.triage.overdue_triage} |\n\n`;
+
+            // Response Times Section
+            report += `## ⏱️ Response Times\n\n`;
+            report += `| Metric | Value |\n`;
+            report += `|--------|-------|\n`;
+            report += `| Average First Response | ${metrics.response_times.avg_first_response_hours}h |\n`;
+            report += `| Issues Without Response | ${metrics.response_times.issues_without_response} |\n\n`;
+
+            // Labels Distribution
+            report += `## 🏷️ Label Distribution\n\n`;
+            
+            if (Object.keys(metrics.labels.by_priority).length > 0) {
+              report += `### Priority Distribution\n`;
+              for (const [priority, count] of Object.entries(metrics.labels.by_priority)) {
+                report += `- **${priority}**: ${count} issues\n`;
+              }
+              report += `\n`;
+            }
+
+            if (Object.keys(metrics.labels.by_component).length > 0) {
+              report += `### Component Distribution\n`;
+              for (const [component, count] of Object.entries(metrics.labels.by_component)) {
+                report += `- **${component}**: ${count} issues\n`;
+              }
+              report += `\n`;
+            }
+
+            if (Object.keys(metrics.labels.by_type).length > 0) {
+              report += `### Type Distribution\n`;
+              for (const [type, count] of Object.entries(metrics.labels.by_type)) {
+                report += `- **${type}**: ${count} issues\n`;
+              }
+              report += `\n`;
+            }
+
+            // Contributors Section
+            report += `## 👥 Contributors\n\n`;
+            report += `| Metric | Count |\n`;
+            report += `|--------|-------|\n`;
+            report += `| Unique Issue Creators | ${metrics.contributors.unique_issue_creators} |\n`;
+            report += `| Unique Commenters | ${metrics.contributors.unique_commenters} |\n`;
+            report += `| Active Assignees | ${metrics.contributors.unique_assignees} |\n\n`;
+
+            // Quality Metrics Section
+            report += `## ✅ Quality Metrics\n\n`;
+            report += `| Metric | Count |\n`;
+            report += `|--------|-------|\n`;
+            report += `| Issues Using Templates | ${metrics.quality.issues_with_templates} |\n`;
+            report += `| Issues Missing Information | ${metrics.quality.issues_missing_info} |\n`;
+            report += `| Stale Issues (>30 days) | ${metrics.quality.stale_issues} |\n\n`;
+
+            // Recommendations Section
+            report += `## 💡 Recommendations\n\n`;
+            
+            if (metrics.triage.overdue_triage > 0) {
+              report += `- ⚠️ **${metrics.triage.overdue_triage} issues need immediate triage** (overdue >3 days)\n`;
+            }
+            
+            if (metrics.response_times.issues_without_response > 0) {
+              report += `- 📝 **${metrics.response_times.issues_without_response} issues lack maintainer response**\n`;
+            }
+            
+            if (metrics.quality.stale_issues > 5) {
+              report += `- 🧹 **Consider reviewing ${metrics.quality.stale_issues} stale issues** for closure\n`;
+            }
+            
+            if (metrics.quality.issues_missing_info > metrics.quality.issues_with_templates) {
+              report += `- 📋 **Improve issue template adoption** - many issues lack sufficient information\n`;
+            }
+
+            const triageEfficiency = metrics.triage.triaged_this_period / (metrics.triage.triaged_this_period + metrics.triage.needs_triage) * 100;
+            if (triageEfficiency < 80) {
+              report += `- ⏰ **Triage efficiency is ${Math.round(triageEfficiency)}%** - consider increasing triage frequency\n`;
+            }
+
+            report += `\n---\n`;
+            report += `*Report generated automatically by GitHub Actions*\n`;
+
+            // Save report as an artifact and optionally create an issue
+            const fs = require('fs');
+            const reportPath = `/tmp/triage-report-${new Date().toISOString().split('T')[0]}.md`;
+            fs.writeFileSync(reportPath, report);
+            
+            console.log('Generated triage report:');
+            console.log(report);
+
+            // For weekly reports, create a discussion or issue with the report
+            if (metrics.period.type === 'weekly' || '${{ github.event_name }}' === 'workflow_dispatch') {
+              try {
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `📊 Weekly Triage Report - ${new Date().toISOString().split('T')[0]}`,
+                  body: report,
+                  labels: ['type: maintenance', 'status: informational']
+                });
+              } catch (error) {
+                console.log(`Could not create issue with report: ${error.message}`);
+              }
+            }
+
+      - name: Upload Report Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: triage-report-${{ github.run_id }}
+          path: /tmp/triage-report-*.md
+          retention-days: 30

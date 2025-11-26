@@ -1,0 +1,125 @@
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: prometheus-ai-prometheus
+    ports:
+      - "${PROMETHEUS_PORT}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=24h"
+    restart: unless-stopped
+    networks:
+      - otel-net
+
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.128.0
+    container_name: prometheus-ai-otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "${OTEL_COLLECTOR_GRPC_PORT}:4317"
+      - "${OTEL_COLLECTOR_HTTP_PORT}:4318"
+      - "${OTEL_COLLECTOR_PROM_PORT}:9464"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - otel-net
+
+
+  app-service:
+    build:
+      context: ./services/app
+    container_name: prometheus-ai-app
+    env_file:
+      - .env
+    environment:
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_METRIC_EXPORT_INTERVAL="5000" # so we don't have to wait 60s for metrics
+      - OTEL_SERVICE_NAME="fastapi-otel"
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_INSECURE=true
+      - OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED=true
+      - OTEL_LOGS_EXPORTER="otlp"
+      - OTEL_TRACES_EXPORTER="otlp"
+      - OTEL_METRICS_EXPORTER="otlp"
+    ports:
+      - "${APP_PORT}:8000"
+    depends_on:
+      - otel-collector
+    restart: unless-stopped
+    networks:
+      - otel-net
+
+
+  ui-service:
+    build:
+      context: ./services/ui
+    container_name: prometheus-ai-ui
+    env_file:
+      - .env
+    environment:
+      - PROMETHEUS_URL=http://prometheus:9090
+      - MCP_SERVER_URL=http://prometheus-mcp-server:${MCP_HTTP_PORT}
+      - OLLAMA_URL=http://ollama:11434
+    ports:
+      - "${UI_PORT}:8080"
+    depends_on:
+      - prometheus
+      - ollama
+      - prometheus-mcp-server
+    restart: unless-stopped
+    networks:
+      - otel-net
+
+  prometheus-mcp-server:
+    build:
+      context: ./prometheus-mcp-server
+    container_name: prometheus-ai-mcp-server
+    env_file:
+      - .env
+    environment:
+      - PROMETHEUS_URL=http://prometheus:9090
+      - PROMETHEUS_MCP_SERVER_TRANSPORT=http
+      - PROMETHEUS_MCP_BIND_HOST=0.0.0.0
+      - PROMETHEUS_MCP_BIND_PORT=${MCP_HTTP_PORT}
+    ports:
+      - "${MCP_HTTP_PORT}:${MCP_HTTP_PORT}"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:${MCP_HTTP_PORT}/mcp"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - otel-net
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: prometheus-ai-ollama
+    ports:
+      - "${OLLAMA_PORT}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_ORIGINS=*
+    restart: unless-stopped
+    networks:
+      - otel-net
+
+volumes:
+  prometheus-data:
+  ollama-data:
+
+
+networks:
+  otel-net:
+    driver: bridge

@@ -1,0 +1,223 @@
+name: 🐛 Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["type: bug", "status: needs-triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report this bug! Please provide as much detail as possible to help us resolve the issue quickly.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please complete the following checklist before submitting your bug report
+      options:
+        - label: I have searched existing issues to ensure this bug hasn't been reported before
+          required: true
+        - label: I have checked the documentation and this appears to be a bug, not a configuration issue
+          required: true
+        - label: I can reproduce this issue consistently
+          required: false
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority Level
+      description: How critical is this bug to your use case?
+      options:
+        - Low - Minor issue, workaround available
+        - Medium - Moderate impact on functionality
+        - High - Significant impact, blocks important functionality
+        - Critical - System unusable, data loss, or security issue
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of the bug
+      placeholder: Describe what happened and what you expected to happen instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Steps to Reproduce
+      description: Detailed steps to reproduce the bug
+      placeholder: |
+        1. Configure the MCP server with...
+        2. Execute the following command...
+        3. Observe the following behavior...
+      value: |
+        1. 
+        2. 
+        3. 
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: What should happen instead of the bug?
+      placeholder: Describe the expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual Behavior
+      description: What actually happens when you follow the reproduction steps?
+      placeholder: Describe what actually happens
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Component
+      description: Which component is affected by this bug?
+      options:
+        - Prometheus Integration (queries, metrics, API calls)
+        - MCP Server (transport, protocols, tools)
+        - Authentication (basic auth, token auth, credentials)
+        - Configuration (environment variables, setup)
+        - Docker/Deployment (containerization, deployment)
+        - Logging (error messages, debug output)
+        - Documentation (README, guides, API docs)
+        - Other (please specify in description)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment-os
+    attributes:
+      label: Operating System
+      description: On which operating system does this bug occur?
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Docker Container
+        - Other (please specify)
+    validations:
+      required: true
+
+  - type: input
+    id: environment-python
+    attributes:
+      label: Python Version
+      description: What version of Python are you using?
+      placeholder: "e.g., 3.11.5, 3.12.0"
+    validations:
+      required: true
+
+  - type: input
+    id: environment-mcp-version
+    attributes:
+      label: Prometheus MCP Server Version
+      description: What version of the Prometheus MCP Server are you using?
+      placeholder: "e.g., 1.2.0, latest, commit hash"
+    validations:
+      required: true
+
+  - type: input
+    id: environment-prometheus
+    attributes:
+      label: Prometheus Version
+      description: What version of Prometheus are you connecting to?
+      placeholder: "e.g., 2.45.0, latest"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: transport-mode
+    attributes:
+      label: Transport Mode
+      description: Which transport mode are you using?
+      options:
+        - stdio (default)
+        - HTTP
+        - SSE
+        - Unknown
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Configuration
+      description: Please share your configuration (remove sensitive information like passwords/tokens)
+      placeholder: |
+        Environment variables:
+        PROMETHEUS_URL=http://localhost:9090
+        PROMETHEUS_USERNAME=...
+        
+        MCP Client configuration:
+        {
+          "mcpServers": {
+            ...
+          }
+        }
+      render: bash
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Logs
+      description: Please include any relevant error messages or logs
+      placeholder: Paste error messages, stack traces, or relevant log output here
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: prometheus-query
+    attributes:
+      label: PromQL Query (if applicable)
+      description: If this bug is related to a specific query, please include it
+      placeholder: "e.g., up, rate(prometheus_http_requests_total[5m])"
+      render: promql
+    validations:
+      required: false
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround
+      description: Have you found any temporary workaround for this issue?
+      placeholder: Describe any workaround you've discovered
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other information that might be helpful
+      placeholder: |
+        - Screenshots
+        - Related issues
+        - Links to relevant documentation
+        - Network configuration details
+        - Prometheus server setup details
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to submit a pull request to fix this issue
+          required: false

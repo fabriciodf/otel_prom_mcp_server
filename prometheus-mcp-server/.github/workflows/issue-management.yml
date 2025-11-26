@@ -1,0 +1,438 @@
+name: Issue Management
+
+on:
+  issues:
+    types: [opened, edited, closed, reopened, labeled, unlabeled]
+  issue_comment:
+    types: [created, edited, deleted]
+  schedule:
+    # Run daily at 9 AM UTC for maintenance tasks
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Management action to perform'
+        required: true
+        default: 'health-check'
+        type: choice
+        options:
+        - health-check
+        - close-stale
+        - update-metrics
+        - sync-labels
+
+permissions:
+  issues: write
+  contents: read
+  pull-requests: read
+
+jobs:
+  issue-triage-rules:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' && (github.event.action == 'opened' || github.event.action == 'edited')
+    
+    steps:
+      - name: Enhanced Auto-Triage
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const title = issue.title.toLowerCase();
+            const body = issue.body ? issue.body.toLowerCase() : '';
+            
+            // Advanced pattern matching for better categorization
+            const patterns = {
+              critical: {
+                keywords: ['critical', 'crash', 'data loss', 'security', 'urgent', 'production down'],
+                priority: 'priority: critical'
+              },
+              performance: {
+                keywords: ['slow', 'timeout', 'performance', 'memory', 'cpu', 'optimization'],
+                labels: ['type: performance', 'priority: high']
+              },
+              authentication: {
+                keywords: ['auth', 'login', 'token', 'credentials', 'unauthorized', '401', '403'],
+                labels: ['component: authentication', 'priority: medium']
+              },
+              configuration: {
+                keywords: ['config', 'setup', 'environment', 'variables', 'installation'],
+                labels: ['component: configuration', 'type: configuration']
+              },
+              docker: {
+                keywords: ['docker', 'container', 'image', 'deployment', 'kubernetes'],
+                labels: ['component: deployment', 'env: docker']
+              }
+            };
+
+            const labelsToAdd = new Set();
+            
+            // Apply pattern-based labeling
+            for (const [category, pattern] of Object.entries(patterns)) {
+              const hasKeyword = pattern.keywords.some(keyword => 
+                title.includes(keyword) || body.includes(keyword)
+              );
+              
+              if (hasKeyword) {
+                if (pattern.labels) {
+                  pattern.labels.forEach(label => labelsToAdd.add(label));
+                } else if (pattern.priority) {
+                  labelsToAdd.add(pattern.priority);
+                }
+              }
+            }
+
+            // Intelligent component detection
+            if (body.includes('promql') || body.includes('prometheus') || body.includes('metrics')) {
+              labelsToAdd.add('component: prometheus');
+            }
+            
+            if (body.includes('mcp') || body.includes('transport') || body.includes('server')) {
+              labelsToAdd.add('component: mcp-server');
+            }
+
+            // Environment detection from issue body
+            const envPatterns = {
+              'env: windows': /windows|win32|powershell/i,
+              'env: macos': /macos|darwin|mac\s+os|osx/i,
+              'env: linux': /linux|ubuntu|debian|centos|rhel/i,
+              'env: docker': /docker|container|kubernetes|k8s/i
+            };
+
+            for (const [label, pattern] of Object.entries(envPatterns)) {
+              if (pattern.test(body) || pattern.test(title)) {
+                labelsToAdd.add(label);
+              }
+            }
+
+            // Apply all detected labels
+            if (labelsToAdd.size > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels: Array.from(labelsToAdd)
+              });
+            }
+
+  intelligent-assignment:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' && github.event.action == 'labeled'
+    
+    steps:
+      - name: Smart Assignment Logic
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const labelName = context.payload.label.name;
+            
+            // Skip if already assigned
+            if (issue.assignees.length > 0) return;
+            
+            // Assignment rules based on labels and content
+            const assignmentRules = {
+              'priority: critical': {
+                assignees: ['pab1it0'],
+                notify: true,
+                milestone: 'urgent-fixes'
+              },
+              'component: prometheus': {
+                assignees: ['pab1it0'],
+                notify: false
+              },
+              'component: authentication': {
+                assignees: ['pab1it0'],
+                notify: true
+              },
+              'type: performance': {
+                assignees: ['pab1it0'],
+                notify: false
+              }
+            };
+
+            const rule = assignmentRules[labelName];
+            if (rule) {
+              // Assign to maintainer
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                assignees: rule.assignees
+              });
+              
+              // Add notification comment if needed
+              if (rule.notify) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `🚨 This issue has been marked as **${labelName}** and requires immediate attention from the maintainer team.`
+                });
+              }
+              
+              // Set milestone if specified
+              if (rule.milestone) {
+                try {
+                  const milestones = await github.rest.issues.listMilestones({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    state: 'open'
+                  });
+                  
+                  const milestone = milestones.data.find(m => m.title === rule.milestone);
+                  if (milestone) {
+                    await github.rest.issues.update({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      milestone: milestone.number
+                    });
+                  }
+                } catch (error) {
+                  console.log(`Could not set milestone: ${error.message}`);
+                }
+              }
+            }
+
+  issue-health-monitoring:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event.inputs.action == 'health-check'
+    
+    steps:
+      - name: Issue Health Check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+
+            const now = new Date();
+            const healthMetrics = {
+              needsAttention: [],
+              staleIssues: [],
+              missingLabels: [],
+              duplicateCandidates: [],
+              escalationCandidates: []
+            };
+
+            for (const issue of issues) {
+              if (issue.pull_request) continue;
+              
+              const updatedAt = new Date(issue.updated_at);
+              const daysSinceUpdate = Math.floor((now - updatedAt) / (1000 * 60 * 60 * 24));
+              
+              // Check for issues needing attention
+              const hasNeedsTriageLabel = issue.labels.some(l => l.name === 'status: needs-triage');
+              const hasAssignee = issue.assignees.length > 0;
+              const hasTypeLabel = issue.labels.some(l => l.name.startsWith('type:'));
+              const hasPriorityLabel = issue.labels.some(l => l.name.startsWith('priority:'));
+              
+              // Issues that need attention
+              if (hasNeedsTriageLabel && daysSinceUpdate > 3) {
+                healthMetrics.needsAttention.push({
+                  number: issue.number,
+                  title: issue.title,
+                  daysSinceUpdate,
+                  reason: 'Needs triage for > 3 days'
+                });
+              }
+              
+              // Stale issues
+              if (daysSinceUpdate > 30) {
+                healthMetrics.staleIssues.push({
+                  number: issue.number,
+                  title: issue.title,
+                  daysSinceUpdate
+                });
+              }
+              
+              // Missing essential labels
+              if (!hasTypeLabel || !hasPriorityLabel) {
+                healthMetrics.missingLabels.push({
+                  number: issue.number,
+                  title: issue.title,
+                  missing: [
+                    !hasTypeLabel ? 'type' : null,
+                    !hasPriorityLabel ? 'priority' : null
+                  ].filter(Boolean)
+                });
+              }
+              
+              // Escalation candidates (high priority, old, unassigned)
+              const hasHighPriority = issue.labels.some(l => 
+                l.name === 'priority: high' || l.name === 'priority: critical'
+              );
+              
+              if (hasHighPriority && !hasAssignee && daysSinceUpdate > 2) {
+                healthMetrics.escalationCandidates.push({
+                  number: issue.number,
+                  title: issue.title,
+                  daysSinceUpdate,
+                  labels: issue.labels.map(l => l.name)
+                });
+              }
+            }
+
+            // Generate health report
+            console.log('=== ISSUE HEALTH REPORT ===');
+            console.log(`Issues needing attention: ${healthMetrics.needsAttention.length}`);
+            console.log(`Stale issues (>30 days): ${healthMetrics.staleIssues.length}`);
+            console.log(`Issues missing labels: ${healthMetrics.missingLabels.length}`);
+            console.log(`Escalation candidates: ${healthMetrics.escalationCandidates.length}`);
+            
+            // Take action on health issues
+            if (healthMetrics.escalationCandidates.length > 0) {
+              for (const issue of healthMetrics.escalationCandidates) {
+                await github.rest.issues.addAssignees({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  assignees: ['pab1it0']
+                });
+                
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `⚡ This high-priority issue has been automatically escalated due to inactivity (${issue.daysSinceUpdate} days since last update).`
+                });
+              }
+            }
+
+  comment-management:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issue_comment'
+    
+    steps:
+      - name: Comment-Based Actions
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const comment = context.payload.comment;
+            const issue = context.payload.issue;
+            const commentBody = comment.body.toLowerCase();
+            
+            // Skip if comment is from a bot
+            if (comment.user.type === 'Bot') return;
+            
+            // Auto-response to common questions
+            const autoResponses = {
+              'how to install': '📚 Please check our [installation guide](https://github.com/pab1it0/prometheus-mcp-server/blob/main/docs/installation.md) for detailed setup instructions.',
+              'docker setup': '🐳 For Docker setup instructions, see our [Docker deployment guide](https://github.com/pab1it0/prometheus-mcp-server/blob/main/docs/deploying_with_toolhive.md).',
+              'configuration help': '⚙️ Configuration details can be found in our [configuration guide](https://github.com/pab1it0/prometheus-mcp-server/blob/main/docs/configuration.md).'
+            };
+
+            // Check for help requests
+            for (const [trigger, response] of Object.entries(autoResponses)) {
+              if (commentBody.includes(trigger)) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `${response}\n\nIf this doesn't help, please provide more specific details about your setup and the issue you're experiencing.`
+                });
+                break;
+              }
+            }
+            
+            // Update status based on maintainer responses
+            const isMaintainer = comment.user.login === 'pab1it0';
+            if (isMaintainer) {
+              const hasWaitingLabel = issue.labels.some(l => l.name === 'status: waiting-for-response');
+              const hasNeedsTriageLabel = issue.labels.some(l => l.name === 'status: needs-triage');
+              
+              // Remove waiting label if maintainer responds
+              if (hasWaitingLabel) {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  name: 'status: waiting-for-response'
+                });
+              }
+              
+              // Remove needs-triage if maintainer responds
+              if (hasNeedsTriageLabel) {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  name: 'status: needs-triage'
+                });
+                
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  labels: ['status: in-progress']
+                });
+              }
+            }
+
+  duplicate-detection:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' && github.event.action == 'opened'
+    
+    steps:
+      - name: Detect Potential Duplicates
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const newIssue = context.payload.issue;
+            const newTitle = newIssue.title.toLowerCase();
+            const newBody = newIssue.body ? newIssue.body.toLowerCase() : '';
+            
+            // Get recent issues for comparison
+            const { data: existingIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              per_page: 50,
+              sort: 'created',
+              direction: 'desc'
+            });
+            
+            // Filter out the new issue itself and PRs
+            const candidates = existingIssues.filter(issue => 
+              issue.number !== newIssue.number && !issue.pull_request
+            );
+            
+            // Simple duplicate detection based on title similarity
+            const potentialDuplicates = candidates.filter(issue => {
+              const existingTitle = issue.title.toLowerCase();
+              const titleWords = newTitle.split(/\s+/).filter(word => word.length > 3);
+              const matchingWords = titleWords.filter(word => existingTitle.includes(word));
+              
+              // Consider it a potential duplicate if >50% of significant words match
+              return matchingWords.length / titleWords.length > 0.5 && titleWords.length > 2;
+            });
+            
+            if (potentialDuplicates.length > 0) {
+              const duplicateLinks = potentialDuplicates
+                .slice(0, 3) // Limit to top 3 matches
+                .map(dup => `- #${dup.number}: ${dup.title}`)
+                .join('\n');
+              
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: newIssue.number,
+                body: `🔍 **Potential Duplicate Detection**
+                
+This issue might be similar to:
+${duplicateLinks}
+
+Please check if your issue is already reported. If this is indeed a duplicate, we'll close it to keep discussions consolidated. If it's different, please clarify how this issue differs from the existing ones.`
+              });
+              
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: newIssue.number,
+                labels: ['needs-investigation']
+              });
+            }

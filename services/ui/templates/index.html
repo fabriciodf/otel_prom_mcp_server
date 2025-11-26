@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Console de PromQL</title>
+    <style>
+        :root {
+            --bg: radial-gradient(circle at 20% 20%, #0d2035, #080d14 55%);
+            --panel: #0f1b2b;
+            --accent: #55e0c2;
+            --text: #e6f1ff;
+            --muted: #9bb2c8;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 32px;
+        }
+        h1 { margin: 0 0 8px; letter-spacing: 0.5px; }
+        p { color: var(--muted); margin-top: 0; }
+        .layout {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 16px;
+            max-width: 1080px;
+            margin: 0 auto;
+        }
+        .card {
+            background: var(--panel);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 14px;
+            padding: 18px;
+            box-shadow: 0 10px 60px rgba(0, 0, 0, 0.35);
+        }
+        label { display: block; margin-bottom: 6px; color: var(--muted); }
+        textarea {
+            width: 100%;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px;
+            background: #0a1623;
+            color: var(--text);
+            padding: 12px;
+            min-height: 120px;
+            resize: vertical;
+        }
+        button {
+            background: var(--accent);
+            border: none;
+            color: #031016;
+            padding: 12px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 700;
+            transition: transform 120ms ease, box-shadow 120ms ease;
+            box-shadow: 0 14px 30px rgba(85, 224, 194, 0.25);
+        }
+        button:hover { transform: translateY(-1px); box-shadow: 0 18px 40px rgba(85, 224, 194, 0.35); }
+        .meta {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            color: var(--muted);
+            font-size: 14px;
+        }
+        .badge {
+            padding: 6px 10px;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        pre {
+            background: #0a1623;
+            border-radius: 10px;
+            padding: 12px;
+            overflow-x: auto;
+        }
+        code { color: #c4f0ff; }
+        .error { color: #ff8c8c; font-weight: 600; }
+        @media (max-width: 720px) { body { padding: 20px; } }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Console de PromQL</h1>
+        <p>Escreva o que deseja medir. O serviço gera a PromQL com Llama3 e consulta o Prometheus deste stack.</p>
+        <div class="meta">
+            <span class="badge">Modelo: {{ model or "llama3.2:1b" }}</span>
+            <span class="badge">Prometheus: {{ prometheus_url or "http://localhost:9090" }}</span>
+            {% if mcp_server_url %}<span class="badge">MCP: {{ mcp_server_url }}</span>{% endif %}
+        </div>
+    </header>
+
+    <main class="layout">
+        <section class="card">
+            <form method="post" action="/prompt">
+                <label for="prompt">Pergunta em linguagem natural</label>
+                <textarea id="prompt" name="prompt" placeholder="ex: Qual a taxa de requisições com erro 5xx no último minuto?" required>{{ prompt or "" }}</textarea>
+                <div style="margin-top:12px; display:flex; gap:12px; align-items:center;">
+                    <button type="submit">Gerar PromQL e consultar</button>
+                    <span style="color:var(--muted); font-size:14px;">O LLM fica dentro do docker-compose (Ollama + llama3.2:1b).</span>
+                </div>
+            </form>
+        </section>
+
+        <section class="card">
+            <h3>PromQL gerada</h3>
+            {% if query %}
+                <pre><code>{{ query }}</code></pre>
+            {% else %}
+                <p class="muted">Envie um prompt para gerar a primeira consulta.</p>
+            {% endif %}
+        </section>
+
+        <section class="card">
+            <h3>Resultado do Prometheus</h3>
+            {% if error %}
+                <p class="error">{{ error }}</p>
+            {% elif result %}
+                <pre><code>{{ result | tojson(indent=2) }}</code></pre>
+            {% else %}
+                <p class="muted">Quando houver uma consulta ela aparece aqui como JSON bruto.</p>
+            {% endif %}
+        </section>
+
+        <section class="card">
+            <h3>Resultado na linguagem do usuário</h3>
+            {% if error %}
+                <p class="error">{{ error }}</p>
+            {% elif natural_answer %}
+                <p>{{ natural_answer }}</p>
+            {% elif result %}
+                <p class="muted">O LLM irá interpretar o resultado assim que houver uma resposta válida.</p>
+            {% else %}
+                <p class="muted">Envie um prompt para ver a interpretação em texto.</p>
+            {% endif %}
+        </section>
+    </main>
+</body>
+</html>

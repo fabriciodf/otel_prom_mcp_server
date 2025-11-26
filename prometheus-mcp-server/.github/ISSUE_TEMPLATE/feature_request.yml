@@ -1,0 +1,255 @@
+name: ✨ Feature Request
+description: Suggest a new feature or enhancement
+title: "[Feature]: "
+labels: ["type: feature", "status: needs-triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a new feature! Please provide detailed information to help us understand and evaluate your request.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please complete the following checklist before submitting your feature request
+      options:
+        - label: I have searched existing issues and discussions for similar feature requests
+          required: true
+        - label: I have checked the documentation to ensure this feature doesn't already exist
+          required: true
+        - label: This feature request is related to the Prometheus MCP Server project
+          required: true
+
+  - type: dropdown
+    id: feature-type
+    attributes:
+      label: Feature Type
+      description: What type of feature are you requesting?
+      options:
+        - New MCP Tool (new functionality for AI assistants)
+        - Prometheus Integration Enhancement (better Prometheus support)
+        - Authentication Enhancement (new auth methods, security)
+        - Configuration Option (new settings, customization)
+        - Performance Improvement (optimization, caching)
+        - Developer Experience (tooling, debugging, logging)
+        - Documentation Improvement (guides, examples, API docs)
+        - Deployment Feature (Docker, cloud, packaging)
+        - Other (please specify in description)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority Level
+      description: How important is this feature to your use case?
+      options:
+        - Low - Nice to have, not critical
+        - Medium - Would improve workflow significantly
+        - High - Important for broader adoption
+        - Critical - Blocking critical functionality
+      default: 1
+    validations:
+      required: true
+
+  - type: textarea
+    id: feature-summary
+    attributes:
+      label: Feature Summary
+      description: A clear and concise description of the feature you'd like to see
+      placeholder: Briefly describe the feature in 1-2 sentences
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem-statement
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve? What pain point are you experiencing?
+      placeholder: |
+        Describe the current limitation or problem:
+        - What are you trying to accomplish?
+        - What obstacles are preventing you from achieving your goal?
+        - How does this impact your workflow?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: Describe your ideal solution to the problem
+      placeholder: |
+        Describe your proposed solution:
+        - How would this feature work?
+        - What would the user interface/API look like?
+        - How would users interact with this feature?
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-cases
+    attributes:
+      label: Use Cases
+      description: Provide specific use cases and scenarios where this feature would be beneficial
+      placeholder: |
+        1. Use case: As a DevOps engineer, I want to...
+           - Steps: ...
+           - Expected outcome: ...
+        
+        2. Use case: As an AI assistant user, I want to...
+           - Steps: ...
+           - Expected outcome: ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Component
+      description: Which component would this feature primarily affect?
+      options:
+        - Prometheus Integration (queries, metrics, API)
+        - MCP Server (tools, transport, protocol)
+        - Authentication (auth methods, security)
+        - Configuration (settings, environment vars)
+        - Docker/Deployment (containers, packaging)
+        - Logging/Monitoring (observability, debugging)
+        - Documentation (guides, examples)
+        - Testing (test framework, CI/CD)
+        - Multiple Components
+        - New Component
+    validations:
+      required: true
+
+  - type: textarea
+    id: technical-details
+    attributes:
+      label: Technical Implementation Ideas
+      description: If you have technical ideas about implementation, share them here
+      placeholder: |
+        - Suggested API changes
+        - New configuration options
+        - Integration points
+        - Technical considerations
+        - Dependencies that might be needed
+    validations:
+      required: false
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples and Mockups
+      description: Provide examples, mockups, or pseudo-code of how this feature would work
+      placeholder: |
+        Example configuration:
+        ```json
+        {
+          "new_feature": {
+            "enabled": true,
+            "settings": "..."
+          }
+        }
+        ```
+        
+        Example usage:
+        ```bash
+        prometheus-mcp-server --new-feature-option
+        ```
+      render: markdown
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you considered any alternative solutions or workarounds?
+      placeholder: |
+        - Alternative approach 1: ...
+        - Alternative approach 2: ...
+        - Current workarounds: ...
+        - Why these alternatives are not sufficient: ...
+    validations:
+      required: false
+
+  - type: dropdown
+    id: breaking-changes
+    attributes:
+      label: Breaking Changes
+      description: Would implementing this feature require breaking changes?
+      options:
+        - No breaking changes expected
+        - Minor breaking changes (with migration path)
+        - Major breaking changes required
+        - Unknown/Need to investigate
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility Considerations
+      description: What compatibility concerns should be considered?
+      placeholder: |
+        - Prometheus version compatibility
+        - Python version requirements
+        - MCP client compatibility
+        - Operating system considerations
+        - Dependencies that might conflict
+    validations:
+      required: false
+
+  - type: textarea
+    id: success-criteria
+    attributes:
+      label: Success Criteria
+      description: How would we know this feature is successfully implemented?
+      placeholder: |
+        - Specific metrics or behaviors that indicate success
+        - User experience improvements
+        - Performance benchmarks
+        - Integration test scenarios
+    validations:
+      required: false
+
+  - type: textarea
+    id: related-work
+    attributes:
+      label: Related Work
+      description: Are there related features in other tools or projects?
+      placeholder: |
+        - Similar features in other MCP servers
+        - Prometheus ecosystem tools that do something similar
+        - References to relevant documentation or standards
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other information that might be helpful
+      placeholder: |
+        - Links to relevant documentation
+        - Screenshots or diagrams
+        - Community discussions
+        - Business justification
+        - Timeline constraints
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to contribute to the implementation of this feature
+          required: false
+        - label: I would be willing to help with testing this feature
+          required: false
+        - label: I would be willing to help with documentation for this feature
+          required: false
