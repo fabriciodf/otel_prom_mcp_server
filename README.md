@@ -1,4 +1,4 @@
-# Otel + Prometheus MCP Server
+# OpenTelemetry + Prometheus MCP Server
 
 Ambiente completo para experimentar Prometheus + OpenTelemetry com dois microsserviços em FastAPI, geração de PromQL com Llama3 e o servidor [prometheus-mcp-server](./prometheus-mcp-server) ligado ao mesmo Prometheus.
 
