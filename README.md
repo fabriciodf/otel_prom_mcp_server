@@ -78,8 +78,3 @@ Em um cliente MCP, aponte para `http://localhost:8082` (ou use stdio/stdio+docke
 - `prometheus-mcp-server`: cópia do repositório oficial, já integrada no compose.
 - `scripts/install.sh`: ajuda a baixar imagens e garantir o modelo do Ollama.
 - `run.sh`: reseta tudo (down -v), remove imagens, pull, build --no-cache, up -d e puxa o modelo.
-
-## Próximos passos (opcional)
-- Adicionar Grafana para dashboards rápidos.
-- Habilitar traces no app usando o mesmo OTLP exporter.
-- Ligar autenticação no Prometheus e repassar para o MCP server.
